@@ -53,6 +53,8 @@ import (
 	"github.com/prometheus/alertmanager/template"
 	"github.com/prometheus/alertmanager/types"
 	"github.com/prometheus/alertmanager/ui"
+
+	"github.com/prometheus/common/https"
 )
 
 var (
@@ -144,6 +146,10 @@ func run() int {
 		settleTimeout        = kingpin.Flag("cluster.settle-timeout", "Maximum time to wait for cluster connections to settle before evaluating notifications.").Default(cluster.DefaultPushPullInterval.String()).Duration()
 		reconnectInterval    = kingpin.Flag("cluster.reconnect-interval", "Interval between attempting to reconnect to lost peers.").Default(cluster.DefaultReconnectInterval.String()).Duration()
 		peerReconnectTimeout = kingpin.Flag("cluster.reconnect-timeout", "Length of time to attempt to reconnect to a lost peer.").Default(cluster.DefaultReconnectTimeout.String()).Duration()
+		TLS                  = kingpin.Flag(
+			"web.tls-config",
+			"Path to TLS config yaml file that enables tls.",
+		).Default("").String()
 	)
 
 	promlogflag.AddFlags(kingpin.CommandLine, &promlogConfig)
@@ -383,12 +389,22 @@ func run() int {
 
 	mux := api.Register(router, *routePrefix)
 
-	srv := http.Server{Addr: *listenAddress, Handler: mux}
+	srv := &http.Server{Addr: *listenAddress, Handler: mux}
 	srvc := make(chan struct{})
+
+	if len(*TLS) > 0 {
+
+		//Config called from config file
+		level.Info(logger).Log("TLS enabled. Loading config from: ", *TLS)
+
+		//tls config added to server
+		srv.TLSConfig = https.GetTLSConfig(*TLS)
+
+	}
 
 	go func() {
 		level.Info(logger).Log("msg", "Listening", "address", *listenAddress)
-		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		if err := https.Listen(srv); err != http.ErrServerClosed {
 			level.Error(logger).Log("msg", "Listen error", "err", err)
 			close(srvc)
 		}
